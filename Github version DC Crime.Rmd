@@ -1,0 +1,543 @@
+---
+title: "Github version"
+author: "Sarah Little"
+date: "4/26/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+STEP 1: Clean the data set: 
+---------------------------
+The story of our data analysis starts with 33,911 observations and 25 variables as stated before. The comments in the Rmd file will help readers to follow along with the rationale behind the data clean up as well as the analysis.
+```{r ,Clean Data, echo=FALSE,include=FALSE}
+#read in the file 
+Crime_DC <- read_csv("Crime_Incidents_in_2019.csv")
+
+#make a copy of the dataset and make more reproducible (command option shift M )
+df <- Crime_DC
+
+#change into date formart 
+df$REPORT_DAT<- as_date(df$REPORT_DAT, "%Y-%m-%d")
+
+#get rid of unnessesary columns 
+df<- df[ -c(1:3,8:10,12,14,16,17,21:25) ]
+
+#make characters into factors 
+df$OFFENSE<- as.factor(df$OFFENSE)
+df$WARD<- as.factor(df$WARD)
+df$SHIFT <- as.factor(df$SHIFT)
+df$METHOD <- as.factor(df$METHOD)
+df$DISTRICT <- as.factor(df$DISTRICT)
+df$NEIGHBORHOOD_CLUSTER<- as.factor(df$NEIGHBORHOOD_CLUSTER)
+df$VOTING_PRECINCT<- as.factor(df$VOTING_PRECINCT)
+
+#make unique lists 
+unique_SHIFT<- unique(df$SHIFT)
+unique_METHOD <- unique(df$METHOD)
+unique_WARD <- unique(df$WARD)
+unique_report_date <- unique(df$REPORT_DAT) 
+crime.type <- unique(as.character(df$OFFENSE))
+unique(df$OFFENSE)
+
+#get month day and year 
+df$month <- month(df$REPORT_DAT)
+df$day   <- day(df$REPORT_DAT)
+
+#don't need to include year since it is all 2019 data but this may be an 
+
+#remove some more columns 
+df<- df[ -c(8,9,10)]
+
+#remove any nas because a random forest model will not work with nas 
+df <-df[!is.na(df$DISTRICT), ] 
+df <- df[!is.na(df$NEIGHBORHOOD_CLUSTER), ] 
+```
+
+Review the new data set we have created 
+--------------------------------------
+```{r ,Head, echo=TRUE}
+#view crime data set (about 500 fewer lines due to NAs and only working with 9 variables now)
+head(df)
+```
+
+STEP 2: Visualize the data 
+---------------------------
+The next part of our data analysis happens with visualizing the data set using r. As stated before, we are going to be focusing most of our attention throughout the project to explaining the OFFENSE  through the SHIFT and WARD variables.
+
+
+
+
+```{r Crime 2019 Data by Offense, echo=FALSE, fig.asp=.7, fig.show="hold", fig.width=5.5}
+#create plot of offense by count 
+ggplot(df)+geom_bar(aes(OFFENSE)) +theme_bw() +ggtitle("Crime 2019 Data by Offense ") +theme(axis.text.x = element_text(angle = 45,hjust=1))
+```
+
+
+
+
+As we can see by this first visualization, Theft/other had the highest count for our data set and arson had the least. We tried out the package rayshader on the above plot, however it will not be knited into this document and remain only in the Rmd file.
+
+
+```{r Rayshader, eval=FALSE, include=FALSE}
+#DO NOT KNIT
+crimeplot = ggplot(Crime_DC) + 
+  geom_bar(aes(x = OFFENSE, fill = WARD)) 
+
+par(mfrow = c(1, 2))
+plot_gg(crimeplot, width = 10, raytrace = TRUE, preview = TRUE)
+
+plot_gg(crimeplot, width = 10, multicore = TRUE, windowsize = c(800, 800), 
+        zoom = 0.90, phi = 35, theta = 30, sunangle = 225, soliddepth = -100)
+Sys.sleep(0.2)
+render_snapshot(clear = TRUE)
+```
+
+
+
+
+We became interested in the number of crimes that happened each day compared to the total crimes committed for 2019. Therefore, we created another data set and added a column where the number of crimes committed per unique day is housed. We call this an event log. The event log was created by finding the total number of offenses that occurred just by day.
+
+
+```{r All Offenses within 2019, echo=FALSE, fig.asp=.7, fig.show="hold", fig.width=5.5}
+# create the event log
+# # of incidents/day split by type 
+crime_by_date <- df %>% 
+  group_by(REPORT_DAT, OFFENSE) %>%
+  tally()
+
+#graph 
+crime_by_date %>%
+  ggplot()+geom_point(aes(REPORT_DAT,n),shape=21)+ggtitle("All Offenses within 2019")+facet_wrap(~OFFENSE)+ theme(axis.text.x = element_text(angle = 45,hjust=1)) + labs(x = "Report Date", y = "frequency")
+```
+
+
+As we can see from the graphs, theft/auto and theft/other have the most activity across the year long span. There are a couple of outliers in the count of crimes committed for in Burglary for the month of June. Theft/auto has an outliers for the month of December and Theft/other has a couple of outliers for the winter months as well. What is interesting about these graphs is we would have expected more variance with homicide, it just seems like a pretty low straight line here. Theft/auto seems to be the most non-linear out of all the offenses. 
+
+
+
+
+Next, we want to visualize the offense reported by date and factor in the SHIFT variable to see how that affects our outliers and visualization of the offenses. 
+
+
+```{r All Offenses by Shift , echo=FALSE, fig.asp=.7, fig.show="hold", fig.width=6.5}
+crime_by_date <- df %>% 
+  group_by(REPORT_DAT, OFFENSE,SHIFT) %>%
+  tally() #counts the number of total offenses (per categpry) by shift for a specific Report Date 
+#2nd graph 
+crime_by_date %>%
+  ggplot()+geom_point(aes(REPORT_DAT,n,color=SHIFT),shape=21)+ggtitle("All Offenses by Shift")+facet_wrap(~OFFENSE)+ theme(axis.text.x = element_text(angle = 45,hjust=1)) + labs(x = "Report Date", y = "Frequency")
+```
+
+
+As we can see by the second graph, all of the homicides reported happened during the midnight shift, all the arson crimes reported happened during the day and evening shifts. And lastly, another factor that stands out is the top tier of theft/other happened during the evening shift, while theft/auto was more of a mix of all shifts.  
+
+
+
+
+We can also try by facet wrapping around the type of shift to give us a little more information.
+
+
+```{r Offenses reported by Shift, echo=FALSE, fig.asp=.7, fig.show="hold", fig.width=5.5}
+crime_by_date <- df %>% 
+  group_by(REPORT_DAT,SHIFT) %>%
+  tally()
+#2nd graph 
+crime_by_date %>%
+  ggplot()+geom_point(aes(REPORT_DAT,n),shape=21)+ggtitle("All Offenses reported by Shift within 2019")+facet_wrap(~SHIFT, scale= "free_x") + theme(axis.text.x = element_text(angle = 45,hjust=1))
+```
+
+
+Again this is just breaking down the data by more by the Shift variable so we can see if there are any outliers regarding crimes reported by shift. The data looks fairly scattered, with a slightly upwards linear trend as we move into the fall and winter months for the day and evening shifts. As for the midnight shift, the pattern in the data almost looks like a parabola, with the peak of midnight shift reports happening in the middle of the summer months. 
+
+
+
+Nest, we will do some modeling on just SHIFT and REPORT_DAT. We are trying to answer one of our questions to possibly help predict the number of crimes that will be reported for a specific shift for that time of the year. This could help the MPD greatly for allocating policing resources if they know one shift is excepted to receive a certain amount of reports. 
+
+
+
+Let's start here: 
+----------------
+
+```{r Number of Crimes Happening by Shift, echo=FALSE, fig.asp=.7, fig.show="hold", fig.width=5.5}
+
+#next we visualize the data 
+crime_by_date %>%
+ggplot() + geom_jitter(aes(REPORT_DAT,n,color=SHIFT),shape=21) + ggtitle("Number of Crimes Happening by Shift")
+```
+
+
+As we can see, this data is very noisy. But the higher tally of crimes seem to always be happening for the evening shift (there is no color overlap above n = 50). Since we aren't sure about which model to fit to the data we will try a linear model first because we are using frequency data. We want to know what the expected number of crimes reported will be given the Report Date and the type of Shift. Below is Model 1.
+
+```{r Model 1, echo=FALSE,fig.asp=.7, fig.show="hold",fig.width =5.5}
+mod1 <- lm(n ~ SHIFT + REPORT_DAT, data = crime_by_date)
+summary(mod1)
+
+
+## calculate and store predicted values
+crime_by_date$phat <- predict(mod1, type="response")
+
+## order by program and then by math
+crime_by_date <- crime_by_date[with(crime_by_date, order(SHIFT, REPORT_DAT)), ]
+
+## create the plot
+ggplot(crime_by_date, aes(x = REPORT_DAT, y = phat,color=SHIFT )) +
+  geom_point(aes(y = n), alpha=.5, position=position_jitter(h=.2),size=.5) +
+  geom_line(size = .5) +
+  labs(x = "Report Date", y = "Frequency") +ggtitle("Model 1 Expected")
+
+mod1$coefficients
+
+```
+
+Model 1 shows that all the predictors are significant at the alpha= 0 level. We can interpret the coefficient for the Midnight Shift to mean, holding all other factors constant, if the shift is midnight, we expect the frequency of crimes to decrease by 10.71 reported crimes. 
+
+Honestly, the data looks a lot like random noise so the prediction line does not do a great job of predicting number of crimes at all. 
+
+Since the data set we are using contains 2 variables, SHIFT and Report_DAT, we will look into some sort of interaction happening between them to predict "n" number of crimes reported. Therefore, we will look at a couple more linear model variations. One with an interaction term and one without. We will also be looking at some splines to find the best curve to fit the data. 
+
+The second model and residuals we will look at will be a linear model with an interaction term between shift and Report Date. Given the report date and the shift, we are expecting this many crimes to be reported.
+
+```{r Model 2, echo=FALSE, fig.asp=.7, fig.show="hold",fig.width =5.5}
+
+mod2 <- lm(n ~ SHIFT*REPORT_DAT, data = crime_by_date)
+summary(mod2)
+## calculate and store predicted values
+crime_by_date$phat <- predict(mod2, type="response")
+
+## order by program and then by math
+crime_by_date <- crime_by_date[with(crime_by_date, order(SHIFT, REPORT_DAT)), ]
+
+## create the plot
+ggplot(crime_by_date, aes(x = REPORT_DAT, y = phat,color=SHIFT )) +
+  geom_point(aes(y = n), alpha=.5, position=position_jitter(h=.2),size =.5) +
+  geom_line(size = .5) +
+  labs(x = "Report Date", y = "frequency") + ggtitle("Model 2 Expected")
+
+#interpret coefficents 
+mod2$coefficients
+
+```
+
+It is hard to tell which one of the 2 models we have run so far are a better fit to the data by looking at the graph. And from the summary data, it is saying the interaction between Report Date and type of Shift is not significant to this model. If we are looking to interpret one of the coefficients such as Evening shift, holding all other factors constant, we should expect the frequency of crime to increase by .818 throughout the year.
+
+
+Now compare the first 2 models' residuals:
+
+```{r ,echo=FALSE, fig.asp=.7, fig.show = "hold", fig.width=5.5}
+#get residuals 
+crime_mod1_2_resid<- crime_by_date %>%
+gather_residuals(mod1,mod2)
+
+#graph
+crime_mod1_2_resid %>%
+ggplot(aes(REPORT_DAT, resid, color = SHIFT)) +
+geom_point(shape=21) +
+facet_grid(model~ SHIFT) + ggtitle("Model 1 and 2 Residuals") + theme(axis.text.x = element_text(angle = 45,hjust=1))
+```
+
+As we can see from the residual plots from the linear model, they do not look like random noise and have pattern to them and are very clustered. So we know that a regular linear model is not a good fit. Next we will look at a polynomial with degree 2.
+
+
+The linear models are a quadratic with degree 2 because we think the data might fit a quadratic pattern better than a linear one. 
+
+
+```{r Model 3, echo=FALSE, fig.asp=.7,fig.show = "hold", fig.width=5.5}
+#linear models
+mod3 <- lm(n ~ SHIFT+poly(REPORT_DAT,2), data = crime_by_date)
+#mod5 <- glm(n ~ SHIFT*poly(REPORT_DAT,2), data = crime_by_date, family = "poisson")
+
+## calculate and store predicted values
+crime_by_date$phat <- predict(mod3, type="response")
+
+## order by program and then by math
+crime_by_date <- crime_by_date[with(crime_by_date, order(SHIFT, REPORT_DAT)), ]
+
+## create the plot
+ggplot(crime_by_date, aes(x = REPORT_DAT, y = phat,color=SHIFT )) +
+  geom_point(aes(y = n), alpha=.5, position=position_jitter(h=.2),size=.5) +
+  geom_line(size = .5) +
+  labs(x = "Report Date", y = "Frequency") + ggtitle("Model 3 Expected")
+
+mod3$coefficients
+
+```
+
+
+Model 3 already looks a lot better than the previous models by using a quadratic instead of a line. The last model we will look at in the linear models will be an interaction with a polynomial degree 2.
+
+```{r Model 4, echo=FALSE, fig.asp=.7, fig.show = "hold", fig.width=5.5}
+#linear models
+
+mod4 <- lm(n ~SHIFT*poly(REPORT_DAT,2), data = crime_by_date)
+
+## calculate and store predicted values
+crime_by_date$phat <- predict(mod4, type="response")
+
+## order by program and then by math
+crime_by_date <- crime_by_date[with(crime_by_date, order(SHIFT, REPORT_DAT)), ]
+
+## create the plot
+ggplot(crime_by_date, aes(x = REPORT_DAT, y = phat,color=SHIFT )) +
+  geom_point(aes(y = n), alpha=.5, position=position_jitter(h=.2),size=.5) +
+  geom_line(size = .5) + facet_wrap(~SHIFT)+
+  labs(x = "Report Date", y = "Frequency") + ggtitle("Model 4 Expected") + theme(axis.text.x = element_text(angle = 45,hjust=1))
+
+mod4$coefficients
+
+```
+
+Model 4 looks the best out of all the models for following the trend of the data a little more closley. Especially by looking at the midnight shift we can tell a huge difference in the trend of the data. We also think that there are some influential outliers that could be affecting this modeling. Still it seems that there could be an even better model than just a polynomial of degree 2.
+
+
+
+However, next we will look at the residuals and see how they compare to the third model.
+
+```{r Model 3 and 4 residuals plots, echo=FALSE, fig.asp=.7, fig.show = "hold", fig.width=5.5}
+#get residuals 
+crime_mod3_4_resid<- crime_by_date %>%
+gather_residuals(mod3,mod4)
+
+#graph
+crime_mod3_4_resid %>%
+ggplot(aes(REPORT_DAT, resid, color = SHIFT)) +
+geom_point(shape=21) +
+facet_grid(model~ SHIFT) + ggtitle("Model 3 and 4 Residuals") + theme(axis.text.x = element_text(angle = 45,hjust=1))
+
+```
+
+
+We can still see some bit of curvature going on in the residuals, so the last couple models we will try will be a variation of a natural spline. We fit 8 different models. The summary and coefficents to model 12 are below.
+
+
+
+```{r Fit the splines, echo=FALSE}
+# let's fit splines of different degrees to the data
+mod5 <- lm(n ~ ns(REPORT_DAT,1)*SHIFT, data = crime_by_date)
+mod6 <- lm(n ~ ns(REPORT_DAT,2)*SHIFT, data = crime_by_date)
+mod7 <- lm(n ~ ns(REPORT_DAT,3)*SHIFT, data = crime_by_date)
+mod8 <- lm(n ~ ns(REPORT_DAT,4)*SHIFT, data = crime_by_date)
+mod9 <- lm(n ~ ns(REPORT_DAT,5)*SHIFT, data = crime_by_date)
+mod10 <- lm(n ~ ns(REPORT_DAT,6)*SHIFT, data = crime_by_date)
+mod11 <- lm(n ~ ns(REPORT_DAT,7)*SHIFT, data = crime_by_date)
+mod12 <- lm(n ~ ns(REPORT_DAT,8)*SHIFT, data = crime_by_date)
+
+#coefficents of mod 12
+summary(mod12)
+mod12$coefficients
+
+crime_by_date[with(crime_by_date, order(SHIFT, REPORT_DAT)), ]
+#just look at model 12 
+crime_by_date$phat <- predict(mod12, type="response")
+
+#graph model 12
+ggplot(crime_by_date, aes(x = REPORT_DAT, y = phat,color=SHIFT )) +
+  geom_point(aes(y = n), alpha=.5, position=position_jitter(h=.2),size=.5) +
+  geom_line(size = .5) + facet_wrap(~SHIFT)+
+  labs(x = "Report Date", y = "Frequency") + ggtitle("Model 12 Expected") + theme(axis.text.x = element_text(angle = 45,hjust=1))
+
+
+#gather residuals 
+crime_mod12_resid<- crime_by_date %>%
+gather_residuals(mod12)
+
+#graph residuals 
+crime_mod12_resid %>%
+ggplot(aes(REPORT_DAT, resid, color = SHIFT)) +
+geom_point(shape=21) +
+facet_grid(model~ SHIFT) + ggtitle("Model 12 Residuals") + theme(axis.text.x = element_text(angle = 45,hjust=1))
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+It is diffucult to fully interpret natural splines. However, we know that from our final natural spline model (mod12), we can interpret the coefficients such as the octic spline found the coefficient for the Midnight Shift interacting with Report Date is statistically significant at the alpha=.05 level and could expect for some days for there to be an increase in number of crimes reported for the Shift by about 11, holding all other factors constant.
+
+
+We can see now that the residuals seem to be more like random noise by using a natural spline in the regression model rather than a linear or polynomial model, however the data still has some clustering and pattern to it. Possibly addressing some of the outliers we see in the midnight shift might also help the model fit better. However, for now we are going to move on to another part of the data set, OFFENSES. 
+
+Chi Squared Test
+----------------
+
+One of our questions we are looking to address is can we find an independent relationship between the type of offense that will occur given the other variables available. In order to answer this problem, we looked into 2 variables, OFFENSE and WARD to see if they have a strong correlation. 
+
+We will perform analysis with a Chi square. We are going to focus the analysis to see if there is an independent relationship between the type of offense that occurred and the ward number that was reported. 
+
+First, we calculate the number of offenses per each type of offense in the table below, as well as a table for the type of offense that occurred given the ward number which is in the table labeled df2. 
+
+
+```{r echo=FALSE,fig.width = 5.5,fig.asp = .7,fig.show = "hold"}
+#To see how many types of offense and how many reported in each type, we use the table function. 
+table(df$OFFENSE)
+
+#propertion table
+prop.table(table(df$OFFENSE))
+
+#Here, as an example for a contingency table, we will look at the types of offenses with respect to their warrd. To do this, we can use the function table again, but with two arguments now.
+df2<-table(df$OFFENSE, df$WARD)
+
+# Graph
+balloonplot(t(df2), main ="Offenses by Ward", xlab ="", ylab="", text.size=.5,
+            label = FALSE, show.margins = FALSE,colsrt=par("srt"),
+                                rowsrt=par("srt"),label.size=.5)
+
+```
+
+
+As we can see from the plot above, the 2 categories for theft have the biggest frequency circles. Also for some crimes like homicide, the block with ward 2 is completely empty meaning there was not a homicide crime reported there for 2019. In agreement  with earlier analysis, Theft/Auto and Theft/Other have the most frequencies in the data set. 
+
+Next we will move on to using a chi squared analysis as well as some other calculated coefficients to determine if the 2 variables are truly independent. 
+
+Using Pearson's chi squared test; a statistical test applied to sets of categorical data to evaluate how likely it is that any observed difference between the sets arose by chance. It is the most widely used of many chi-squared tests.The null hypothesis for this test is that there is no relationship between Ward and type of Offense.  The alternative hypothesis is that there is a relationship between Ward and type of Offense.
+
+First: Conduct the test 
+```{r echo=FALSE}
+chisq<-chisq.test(df$WARD, df$OFFENSE, correct = FALSE)
+chisq
+```
+
+Thus, with a very small p-value we can reject the null hypothesis in favor of the alternative that there is an association between shift and offense. Our chi squared statistic is 2629.1
+
+The observed and the expected counts can be extracted from the result of the test as follow:
+```{r echo=FALSE}
+# Observed counts
+observed<-chisq$observed
+head(observed)
+```
+
+
+```{r echo=FALSE}
+# Expected counts
+expected<-round(chisq$expected,2)
+head(expected)
+```
+By comparing at the expected values compared to the observed, we can see that our expected values are greater than the observed. So if the police department notices a spike in any specific wards with a particular assault, they could test whether the increase reflects a real change or is just a coincidence. 
+
+If you want to know the most contributing cells to the total Chi-square score, you just have to calculate the Chi-square statistic for each cell: Pearson residuals can be easily extracted from the output of the function chisq.test():
+
+```{r echo=FALSE}
+# returns the so-called Pearson residuals (r) for each cell (or standardized residuals)
+#Cells with the highest absolute standardized residuals contribute the most to the total Chi-square score.
+round(chisq$residuals, 3)
+```
+The highest residuals seem to be homicide in ward 6 and motor vehicle theft in ward 7 and assault with dangerous weapon in ward 8.
+
+Let’s visualize Pearson residuals using the package corrplot:
+
+
+```{r echo=FALSE,fig.width = 5.5,fig.asp = .7,fig.show = "hold"}
+corrplot(chisq$residuals, is.cor = FALSE,tl.col="black",tl.cex=0.8, tl.srt=45,col=brewer.pal(n=8, name="RdYlBu"))
+```
+
+
+Blue colored implies a positive association between Ward and Offense, like we see in Wards 7 and 8 for assault with a dangerous weapon. A red color indicates a negative association between the 2 variables like we see in Ward 2 assault with a dangerous weapon. 
+
+Now lets look at contribution. The contribution (in %) of a given cell to the total Chi-square score is calculated as follow:
+```{r echo=FALSE}
+# Contibution in percentage (%)
+contrib <- 100*chisq$residuals^2/chisq$statistic
+round(contrib, 3)
+```
+
+
+
+```{r echo=FALSE,fig.width = 5.5,fig.asp = .7,fig.show = "hold"}
+# Visualize the contribution
+corrplot(contrib, is.cor = FALSE,tl.col="black",tl.cex=0.8, tl.srt=45,col=brewer.pal(n=8, name="RdYlBu"))
+```
+
+
+The relative contribution of each cell to the total Chi-square score give some indication of the nature of the dependency between rows and columns of the contingency table.
+
+It can be seen that: Assault w/ a dangerous weapon is strongly associated with Ward 8 and Ward 7. Theft/other is strongly associated with Ward 2. Homicide is strongly associated with Ward 8 and Motor vehicle theft is strongly associated with Ward 7.
+
+From the image above, it can be seen that the most contributing cells to the Chi-square are Ward 8/Assault (15.49%), Ward 8/Homicide (~4%), Ward 7/Assault (11.62%), Ward 7/Motor Vehicle Theft(~4%)
+
+In conclusion, these cells contribute about 35.11% to the total Chi-square score and thus account for most of the difference between expected and observed values. 
+
+
+Other Coefficients of Possible Interest 
+---------------------------------------
+
+Below are some other examples of coefficients we decided to run.
+A problem with Pearson’s chi squared coefficient is that the range of its maximum value depends on the sample size and the size of the contingency table. These values may vary in different situations. To overcome this problem, the coefficient can be standardized to lie between 0 and 1 so that it is independent of the sample size as well as the dimension of the contingency table. Several coefficients have been defined for this purpose, and we will consider some of them in the following section.
+
+
+Calculating (corrected) contingency coefficient:
+```{r echo=FALSE}
+
+#This function allows us to calculate both the original and corrected contigency table by changing the parameter correct to True or False.
+
+ContCoef(df$WARD, df$OFFENSE, correct = FALSE)
+ContCoef(df$WARD, df$OFFENSE, correct = TRUE)
+```
+
+Cramers V
+```{r echo=FALSE}
+cramerV(df$WARD, df$OFFENSE, bias.correct = FALSE)
+#and 
+cramersV(df$WARD, df$OFFENSE)
+#and 
+assocstats(xtabs(~df$WARD + df$OFFENSE))
+```
+Yields the same result for Cramer’s V, while the corrected version of Cramer’s V in the package rcompanion, which is:
+
+```{r echo=FALSE}
+cramerV(df$WARD, df$OFFENSE, bias.correct = TRUE)
+```
+
+These coefficients are defined for the purpose of measuring the strength of association between two discrete (categorical) variables.
+
+Calculating uncertainty coefficient: The uncertainty coefficient measures the proportion of uncertainty (entropy) in the column variable Y that is explained by the row variable X.
+```{r echo=FALSE}
+#this is first calcultating the uncertainity of the ward given the type of offenese occured 
+UncertCoef(table(df$WARD, df$OFFENSE), direction = "column")
+```
+
+Nest we calculate the uncertainty of offense given ward:
+```{r echo=FALSE}
+UncertCoef(table(df$WARD, df$OFFENSE), direction = "row")
+```
+
+Finally, to calculate the symmetric measure of the uncertainty coefficient, we get:
+```{r echo=FALSE}
+UncertCoef(table(df$WARD, df$OFFENSE), direction = "symmetric")
+```
+
+
+
+Conclusion: 
+-----------
+Although our modeling might not have turned out the nice clean results we were looking for like we often see in data we have used in our studies, we learned a lot by having to work with real word data. For instance, linear modeling is defiantly not the go to answer all the time and it can take some real trial and error to get the right model to work. It took a lot of research trying to determine what type of analysis we should want to use with this specific data. As we discovered, there is not a lot of information out there about work being done with purely discrete data sets.
+
+Our results from the analysis yielded some real information that may be useful to the DC police. For instance, we know that from our final natural spline model, we can interpret the coefficients such as the octic spline found the coefficient for the Midnight Shift interacting with Report Date is statistically significant at the alpha=.05 level and could expect for some days for there to be an increase in number of crimes reported for the Shift by about 11, holding all other factors constant. We also found significant results from the Chi squared test demonstrating that Ward and Offense type are not independent variables. We think it would be a goal of the police department to take the information from from the chi squared analysis and apply it to their policing strategies to drive down the frequency of the most influential cases we outlined earlier. 
+
+
+There were multiple limits to our ability with this data set. As we know, the corona virus forced school to go online, so communication between group partners was definitely stretched a little thin at times. Other limitations we encountered was the ability of our computers to quickly process this much data. There were multiple times that we had to completely uninstall R because it would get frozen trying to run a function. Some biases we encountered was knowing what Wards we should expect to see higher rates of crime for because of prejudice and bias that we have encountered while living in DC. This could have definitely played a factor into how we interpreted the Chi squared results. We also believe there may have been some bias reported in the police department that could have affected our data and that is why they decided to switch to a new data entry system in February. We also know that police departments are criticized all the time for bias practices, so if the police officers are the ones entering this data we should also be concerned about the unintentional bias going on. 
+
+
+We also believe that reproducible to 2020 data might be hard given the current COVID pandemic. Crime rates all over the United States have experienced dramatic shifts with quarantine, so fitting our models to future data might cause some problems. 
+
+```{r}
+sessionInfo()
+```
